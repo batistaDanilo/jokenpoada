@@ -1,5 +1,6 @@
 package tech.ada.games.jokenpo.service;
 
+import jakarta.persistence.Tuple;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -7,25 +8,30 @@ import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import tech.ada.games.jokenpo.dto.GameDto;
 import tech.ada.games.jokenpo.dto.GameMoveDto;
+import tech.ada.games.jokenpo.dto.RankingDto;
 import tech.ada.games.jokenpo.dto.ResultDto;
 import tech.ada.games.jokenpo.exception.BadRequestException;
 import tech.ada.games.jokenpo.exception.DataConflictException;
 import tech.ada.games.jokenpo.exception.DataNotFoundException;
-import tech.ada.games.jokenpo.model.*;
+import tech.ada.games.jokenpo.model.Game;
+import tech.ada.games.jokenpo.model.Move;
+import tech.ada.games.jokenpo.model.Player;
+import tech.ada.games.jokenpo.model.PlayerMove;
 import tech.ada.games.jokenpo.repository.GameRepository;
 import tech.ada.games.jokenpo.repository.MoveRepository;
 import tech.ada.games.jokenpo.repository.PlayerMoveRepository;
 import tech.ada.games.jokenpo.repository.PlayerRepository;
 import tech.ada.games.jokenpo.security.SecurityUtils;
 
-import java.time.LocalDateTime;
-import java.util.*;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-class GameServiceTest {
+class GameServiceTest extends AbstractServiceTest {
 
     private GameRepository gameRepository;
     private PlayerMoveRepository playerMoveRepository;
@@ -80,7 +86,7 @@ class GameServiceTest {
     }
 
     @Test
-    void createGameWithNotRegistredCurrentPlayerInsuccessTest() {
+    void createGameWithNotRegistredCurrentPlayerShouldThrowDataNotFoundExceptionTest() {
         // Given (Arrange)
         final GameDto gameDto = this.buildGameDto();
         final String playerUsername1 = "player1";
@@ -111,7 +117,7 @@ class GameServiceTest {
     }
 
     @Test
-    void createGameWithLessOf2PlayersInsuccessTest() {
+    void createGameWithLessOf2PlayersShouldThrowBadRequestExceptionTest() {
         // Given (Arrange)
         final String playerUsername1 = "player1";
         final Player player1 = this.buildPlayer(1L, playerUsername1, "Player 1");
@@ -133,7 +139,7 @@ class GameServiceTest {
     }
 
     @Test
-    void createGameWithNotRegistredPlayerInsuccessTest() {
+    void createGameWithNotRegistredPlayerShouldThrowDataNotFoundExceptionTest() {
         // Given (Arrange)
         final String playerUsername1 = "player1";
         final Player player1 = this.buildPlayer(1L, playerUsername1, "Player 1");
@@ -192,7 +198,7 @@ class GameServiceTest {
     }
 
     @Test
-    void findGamesTest() {
+    void findGamesShouldReturnListOfGamesTest() {
         // Given (Arrange)
         final List<Game> expectedResponse = List.of(new Game());
         when(gameRepository.findAll()).thenReturn(expectedResponse);
@@ -205,7 +211,7 @@ class GameServiceTest {
     }
 
     @Test
-    void findGameByIdTest() throws DataNotFoundException {
+    void findGameByIdShouldReturnGameTest() throws DataNotFoundException {
         // Given (Arrange)
         final Long id = 1L;
         final Player player = this.buildPlayer(id, "player", "Player");
@@ -220,7 +226,7 @@ class GameServiceTest {
     }
 
     @Test
-    void findGameByIdThrowsDataNotFoundExceptionTest() {
+    void findGameByIdWithNotRegistredGameShouldThrowsDataNotFoundExceptionTest() {
         // Given (Arrange)
         final Long id = 1L;
 
@@ -521,7 +527,7 @@ class GameServiceTest {
     }
 
     @Test
-    void insertPlayerMoveNotRegistredGameInsuccessTest() {
+    void insertPlayerMoveWithNotRegistredGameShouldThrowsDataNotFoundExceptionTest() {
         // Given (Arrange)
         final Long id = 1L;
         final String playerUsername = "player";
@@ -542,68 +548,137 @@ class GameServiceTest {
         verify(playerRepository, times(0)).findById(2L);
     }
 
-    private GameDto buildGameDto() {
-        final GameDto gameDto = new GameDto();
-        List<Long> players = Arrays.asList(1L, 2L);
-        gameDto.setPlayers(players);
-        return gameDto;
+    @Test
+    void insertPlayerMoveWithFinishedGameShouldThrowsBadRequestExceptionTest() {
+        // Given (Arrange)
+        final Long id = 1L;
+        final String playerUsername = "player";
+        final Player player = this.buildPlayer(id, playerUsername, "Player ");
+        final Game expectedGame = this.buildGame(player, Boolean.TRUE);
+        mockStatic.when(SecurityUtils::getCurrentUserLogin).thenReturn(playerUsername);
+        when(playerRepository.findByUsername(playerUsername)).thenReturn(Optional.of(player));
+        when(gameRepository.findById(id)).thenReturn(Optional.of(expectedGame));
+
+        // When (Act)
+        final BadRequestException exception = assertThrows(
+                BadRequestException.class , () -> service.insertPlayerMove(buildGameMoveDTO()));
+
+        // Then (Assert)
+        assertEquals("O jogo já foi finalizado!", exception.getMessage());
+        verify(playerRepository, times(1)).findByUsername(playerUsername);
+        verify(gameRepository, times(1)).findById(1L);
+        verify(gameRepository, times(0)).save(any());
+        verify(playerRepository, times(0)).findById(1L);
+        verify(playerRepository, times(0)).findById(2L);
     }
 
-    private GameDto buildGameDto(List<Long> players) {
-        final GameDto gameDto = new GameDto();
-        gameDto.setPlayers(players);
-        return gameDto;
+    @Test
+    void insertPlayerMoveWithNotRegistredMoveShouldThrowDataNotFoundExceptionTest() {
+        // Given (Arrange)
+        final Long id = 1L;
+        final String playerUsername = "player";
+        final Player player = this.buildPlayer(id, playerUsername, "Player");
+        final Game expectedGame = this.buildGame(player);
+        mockStatic.when(SecurityUtils::getCurrentUserLogin).thenReturn(playerUsername);
+        when(playerRepository.findByUsername(playerUsername)).thenReturn(Optional.of(player));
+        when(gameRepository.findById(id)).thenReturn(Optional.of(expectedGame));
+        final GameMoveDto gameMoveDto = GameMoveDto.builder().gameId(1L).moveId(10L).build(); // Move is not registred
+
+        // When (Act)
+        final DataNotFoundException exception = assertThrows(
+                DataNotFoundException.class , () -> service.insertPlayerMove(gameMoveDto));
+
+        // Then (Assert)
+        assertEquals("Jogada não cadastrada", exception.getMessage());
+        verify(playerRepository, times(1)).findByUsername(playerUsername);
+        verify(gameRepository, times(1)).findById(1L);
+        verify(gameRepository, times(0)).save(any());
+        verify(playerRepository, times(0)).findById(1L);
+        verify(playerRepository, times(0)).findById(2L);
     }
 
-    private Player buildPlayer(final Long id, final String username, final String name) {
-        final Player player = new Player();
-        player.setId(id);
-        player.setUsername(username);
-        player.setPassword("1234");
-        player.setName(name);
-        final Role role = this.buildRole();
-        Set<Role> roles = new HashSet<>();
-        roles.add(role);
-        player.setRoles(roles);
-        return player;
+    @Test
+    void insertPlayerMovePlayerWithPlayerNotRegistredInGameShouldThrowDataNotFoundExceptionTest() {
+        // Given (Arrange)
+        final Long id = 1L;
+        final String playerUsername = "player";
+        final Player player = this.buildPlayer(id, playerUsername, "Player");
+        final Player playerNotRegistredInGame = this.buildPlayer(2L, "playernotregistred", "Player Not Registred");
+        final Game expectedGame = this.buildGame(playerNotRegistredInGame); // Another player registred in game
+        final Move expectedMove = this.buildMove(1L, "spock");
+        mockStatic.when(SecurityUtils::getCurrentUserLogin).thenReturn(playerUsername); // Current player
+        when(playerRepository.findByUsername(playerUsername)).thenReturn(Optional.of(player));
+        when(gameRepository.findById(id)).thenReturn(Optional.of(expectedGame));
+        when(moveRepository.findById(any())).thenReturn(Optional.of(expectedMove));
+
+        // When (Act)
+        final DataNotFoundException exception = assertThrows(
+                DataNotFoundException.class , () -> service.insertPlayerMove(buildGameMoveDTO()));
+
+        // Then (Assert)
+        assertEquals("Jogador não está cadastrado no jogo!", exception.getMessage());
+        verify(playerRepository, times(1)).findByUsername(playerUsername);
+        verify(gameRepository, times(1)).findById(1L);
+        verify(gameRepository, times(0)).save(any());
+        verify(playerRepository, times(0)).findById(1L);
+        verify(playerRepository, times(0)).findById(2L);
     }
 
-    private Role buildRole() {
-        final Role role = new Role();
-        role.setId(1L);
-        role.setName("ROLE_USER");
-        return role;
+    @Test
+    void insertPlayerMovePlayerWithAlreadyRegistredMoveShouldThrowDataConflictExceptionTest() {
+        // Given (Arrange)
+        final Long id = 1L;
+        final String playerUsername = "player";
+        final Player player = this.buildPlayer(id, playerUsername, "Player");
+        final Game expectedGame = this.buildGame(player);
+        final Move expectedMove = this.buildMove(id, "spock");
+        final PlayerMove expectedPlayerMove = this.buildPlayerMove(id, expectedGame, player, expectedMove);
+        mockStatic.when(SecurityUtils::getCurrentUserLogin).thenReturn(playerUsername); // Current player
+        when(playerRepository.findByUsername(playerUsername)).thenReturn(Optional.of(player));
+        when(gameRepository.findById(id)).thenReturn(Optional.of(expectedGame));
+        when(moveRepository.findById(any())).thenReturn(Optional.of(expectedMove));
+        when(playerMoveRepository.findByUnfinishedGameIdAndPlayer(any(), any())).thenReturn(Optional.of(expectedPlayerMove));
+
+        // When (Act)
+        final DataConflictException exception = assertThrows(
+                DataConflictException.class , () -> service.insertPlayerMove(buildGameMoveDTO()));
+
+        // Then (Assert)
+        assertEquals("Jogador já realizou a sua jogada!", exception.getMessage());
+        verify(playerRepository, times(1)).findByUsername(playerUsername);
+        verify(gameRepository, times(1)).findById(1L);
+        verify(gameRepository, times(0)).save(any());
+        verify(playerRepository, times(0)).findById(1L);
+        verify(playerRepository, times(0)).findById(2L);
     }
 
-    private Game buildGame(final Player player) {
-        final Game game = new Game();
-        game.setId(player.getId());
-        game.setCreator(player);
-        game.setFinished(Boolean.FALSE);
-        game.setCreatedAt(LocalDateTime.now());
-        return game;
+    // Teste criado utilizando o TDD
+    @Test void getRankingShouldReturnRankingListTest() {
+
+        // Given
+        List<Tuple> expectedTuple = this.buildTupleList(3);
+        when(gameRepository.getRanking()).thenReturn(expectedTuple);
+
+        // When
+        List<RankingDto> response = service.getRanking();
+
+        // Then
+        assertEquals(expectedTuple.size(), response.size());
+        verify(gameRepository, times(1)).getRanking();
     }
 
-    private GameMoveDto buildGameMoveDTO() {
-        GameMoveDto gmDto = new GameMoveDto();
+    @Test void getRankingShouldReturnEmptyListTest() {
 
-        gmDto.setMoveId(1L);
-        gmDto.setGameId(1L);
-        return gmDto;
-    }
-    private Move buildMove(final Long id, final String moveName) {
-        Move move = new Move();
-        move.setMove(moveName);
-        move.setId(id);
-        return move;
-    }
+        // Given
+        List<Tuple> expectedTuple = this.buildTupleList(0);
+        when(gameRepository.getRanking()).thenReturn(expectedTuple);
 
-    private PlayerMove buildPlayerMove(Long id, Game game, Player player) {
-        PlayerMove pMove = new PlayerMove();
-        pMove.setGame(game);
-        pMove.setPlayer(player);
-        pMove.setId(id);
-        return pMove;
+        // When
+        List<RankingDto> response = service.getRanking();
+
+        // Then
+        assertEquals(expectedTuple.size(), response.size());
+        verify(gameRepository, times(1)).getRanking();
     }
 
 }
